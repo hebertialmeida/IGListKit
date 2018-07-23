@@ -42,6 +42,13 @@ static CGFloat CGRectGetLengthInDirection(CGRect rect, UICollectionViewScrollDir
     }
 }
 
+static CGFloat CGRectGetBreadthInDirection(CGRect rect, UICollectionViewScrollDirection direction) {
+    switch (direction) {
+        case UICollectionViewScrollDirectionVertical: return rect.size.width;
+        case UICollectionViewScrollDirectionHorizontal: return rect.size.height;
+    }
+}
+
 static CGFloat CGRectGetMaxInDirection(CGRect rect, UICollectionViewScrollDirection direction) {
     switch (direction) {
         case UICollectionViewScrollDirectionVertical: return CGRectGetMaxY(rect);
@@ -60,6 +67,13 @@ static CGFloat CGSizeGetLengthInDirection(CGSize size, UICollectionViewScrollDir
     switch (direction) {
         case UICollectionViewScrollDirectionVertical: return size.height;
         case UICollectionViewScrollDirectionHorizontal: return size.width;
+    }
+}
+
+static CGFloat CGSizeGetBreadthInDirection(CGSize size, UICollectionViewScrollDirection direction) {
+    switch (direction) {
+        case UICollectionViewScrollDirectionVertical: return size.width;
+        case UICollectionViewScrollDirectionHorizontal: return size.height;
     }
 }
 
@@ -550,7 +564,7 @@ static void adjustZIndexForAttributes(UICollectionViewLayoutAttributes *attribut
                 itemLengthInFixedDirection = paddedLengthInFixedDirection - itemCoordInFixedDirection;
             }
 
-            const CGRect rawFrame = (self.scrollDirection == UICollectionViewScrollDirectionVertical) ?
+            CGRect rawFrame = (self.scrollDirection == UICollectionViewScrollDirectionVertical) ?
                     CGRectMake(itemCoordInFixedDirection,
                             itemCoordInScrollDirection + insets.top,
                             itemLengthInFixedDirection,
@@ -559,6 +573,42 @@ static void adjustZIndexForAttributes(UICollectionViewLayoutAttributes *attribut
                             itemCoordInFixedDirection,
                             size.width,
                             itemLengthInFixedDirection);
+
+            // Look behind to find last positions
+            NSInteger numberOfColumns = [self _numberOfColumnsWithRect:rawFrame andItemSpacing:interitemSpacing];
+            NSInteger lastSectionInColumn = section-numberOfColumns;
+
+            BOOL needsFixRect = NO;
+            for (NSInteger item = 1; item <= numberOfColumns; item++) {
+                NSInteger prevSection = section-item;
+                if (prevSection > 0 && prevSection < sectionCount) {
+                    CGRect prevRect = _sectionData[prevSection].bounds;
+                    NSInteger prevNumberOfColumns = [self _numberOfColumnsWithRect:prevRect andItemSpacing:interitemSpacing];
+                    if (numberOfColumns != prevNumberOfColumns) {
+                        needsFixRect = NO;
+                        break;
+                    }
+                    needsFixRect = YES;
+                }
+            }
+
+            if (needsFixRect && numberOfColumns > 1) {
+                const CGRect prevRectInColumn = _sectionData[lastSectionInColumn].bounds;
+                const CGFloat length = CGRectGetLengthInDirection(prevRectInColumn, self.scrollDirection);
+                const CGFloat leading = UIEdgeInsetsLeadingInsetInDirection(insets, self.scrollDirection);
+                const CGFloat offset = CGPointGetCoordinateInDirection(prevRectInColumn.origin, self.scrollDirection);
+                const CGFloat newOffset = offset + length + leading + lineSpacing;
+
+                switch (self.scrollDirection) {
+                    case UICollectionViewScrollDirectionVertical:
+                        rawFrame.origin.y = newOffset;
+                        break;
+                    case UICollectionViewScrollDirectionHorizontal:
+                        rawFrame.origin.x = newOffset;
+                        break;
+                }
+            }
+
             const CGRect frame = IGListRectIntegralScaled(rawFrame);
 
             _sectionData[section].itemBounds[item] = frame;
@@ -630,6 +680,10 @@ static void adjustZIndexForAttributes(UICollectionViewLayoutAttributes *attribut
     }
 
     _minimumInvalidatedSection = NSNotFound;
+}
+
+- (NSInteger)_numberOfColumnsWithRect:(CGRect)rect andItemSpacing:(CGFloat)interitemSpacing {
+    return lroundf((CGSizeGetBreadthInDirection(self.collectionViewContentSize, self.scrollDirection) - interitemSpacing) / (CGRectGetBreadthInDirection(rect, self.scrollDirection)));
 }
 
 - (NSRange)_rangeOfSectionsInRect:(CGRect)rect {
